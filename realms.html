@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ludo Realms · Siege</title>
+<meta name="theme-color" content="#477747">
+<link rel="stylesheet" href="realms.css">
+</head><body>
+<svg id="defs" width="0" height="0" style="position:absolute" aria-hidden="true"></svg>
+<main id="app">
+
+<section id="menu" class="scr">
+ <div class="hero">
+  <div class="crest">🏰</div>
+  <h1>Ludo Realms</h1>
+  <p class="sub">Siege &amp; Vassalage</p>
+ </div>
+ <div class="card">
+  <p class="lbl">Players</p>
+  <div class="seg" id="np"><button data-v="2">2</button><button data-v="3">3</button><button data-v="4" class="on">4</button></div>
+  <button class="btn primary" id="start">Start game</button>
+  <p class="hint">Pass &amp; play on one device.</p>
+ </div>
+ <div class="card rules">
+  <h3>How to play</h3>
+  <ul>
+   <li><b>Your army:</b> Queen on your corner, Rook, Bishop, Knight and 4 Pawns around her. Your <b>King</b> waits in the palace outside the grid and only watches.</li>
+   <li><b>Roll 1–4:</b> move one piece. Queen, Rook and Bishop slide up to that many squares, the Knight makes its L-jump (over walls too), Pawns go 1 or 2 squares forward and capture diagonally.</li>
+   <li><b>Roll 5 💣 Bomb:</b> smash any wall segment, or blow up an enemy piece sitting in a Haven.</li>
+   <li><b>Roll 6 🛡 Haven:</b> make one of your pieces immune to normal attacks until it moves.</li>
+   <li><b>Walls:</b> each realm is walled off. Only the 2-square gates let pieces through (Knights jump).</li>
+   <li><b>Storm the palace:</b> land on an enemy's corner gate square and that kingdom falls.</li>
+   <li><b>Promotion:</b> a Pawn reaching one of the 3 gold-marked squares beside an enemy palace becomes a Queen, Rook, Bishop or Knight.</li>
+   <li><b>Surrender:</b> demand it from a weakened player (3 pieces or fewer). If they accept, their army turns into your Pawns.</li>
+   <li><b>Win</b> by being the last kingdom standing.</li>
+  </ul>
+ </div>
+ <a class="btn ghost" href="index.html">← Back to Ludo</a>
+</section>
+
+<section id="game" class="scr" hidden>
+ <div id="top"><button class="btn small" id="back">Menu</button><div id="status"></div></div>
+ <div id="boardwrap"><svg id="board" viewBox="0 0 744 744" role="img" aria-label="Realms board"></svg></div>
+ <div id="chips"></div>
+ <div id="controls">
+  <button id="dice" class="die" aria-label="Roll the dice">🎲</button>
+  <div id="hint"></div>
+ </div>
+ <div class="legend"><span>1–4 move</span><span>5 💣 bomb</span><span>6 🛡 haven</span></div>
+ <button class="btn ghost" id="surr">🏳 Demand surrender</button>
+</section>
+
+</main>
+<div id="modal" hidden><div class="mbox"><h2 id="mt"></h2><div id="mb"></div><div id="mbtn"></div></div></div>
+<script src="realms.js"></script>
+</body></html>
