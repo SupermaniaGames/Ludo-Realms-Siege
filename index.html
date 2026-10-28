@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Ludo Realms: Siege</title>
-<meta name="description" content="A 4-kingdom chess-style siege game with 3D pieces. Pass and play.">
-<meta name="theme-color" content="#2b1a0c">
+<meta name="description" content="A 4-kingdom chess-style siege game with 3D pieces. Play with friends online, against the computer, or pass and play.">
+<meta name="theme-color" content="#1d1209">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -14,56 +14,79 @@
 <body>
 <div id="app">
   <header id="top">
-    <div class="banner"><h1>Ludo Realms: Siege</h1></div>
+    <div class="brand"><span class="crest">♛</span><h1>Ludo Realms <small>Siege</small></h1></div>
     <div id="ribbon"><span id="ribIcon"></span><b id="ribText"></b></div>
+    <div class="tools">
+      <button id="help" class="round" title="How to play" aria-label="How to play">?</button>
+      <button id="snd" class="round" title="Sound" aria-label="Sound on or off">🔊</button>
+      <button id="menuBtn" class="round" title="Menu" aria-label="Menu">☰</button>
+    </div>
   </header>
-
-  <aside id="left">
-    <section class="panel"><h2>Players</h2><ul id="plist"></ul></section>
-    <section class="panel"><h2>Piece Legend</h2><ul id="legend"></ul></section>
-  </aside>
 
   <main id="stage">
     <canvas id="cv" aria-label="Game board"></canvas>
     <div id="toast" role="status" aria-live="polite"></div>
+    <div id="modeTag" hidden></div>
     <div id="viewbtns">
-      <button id="vl" title="Rotate left" aria-label="Rotate view left">⟲</button>
-      <button id="vh" title="Reset view" aria-label="Reset view">⌂</button>
-      <button id="vr" title="Rotate right" aria-label="Rotate view right">⟳</button>
-      <button id="snd" title="Sound" aria-label="Sound on or off">🔊</button>
+      <button id="vl" class="round" title="Rotate left" aria-label="Rotate view left">⟲</button>
+      <button id="vh" class="round" title="Reset view" aria-label="Reset view">⌂</button>
+      <button id="vr" class="round" title="Rotate right" aria-label="Rotate view right">⟳</button>
     </div>
   </main>
 
-  <aside id="right">
-    <section class="panel faces"><h2>Custom D6 Dice</h2><div id="faces"></div></section>
-    <section class="panel effects"><h2>D6 Effects</h2>
-      <p><b>1–4 Move:</b> move one piece up to that many squares.</p>
-      <p><b>5 Breaker:</b> blast a wall open, or destroy a piece inside a Haven.</p>
-      <p><b>6 Haven:</b> shield one piece from normal attacks.</p>
-    </section>
-    <div class="dock">
-      <div id="result"><div id="die"></div><div id="hint">Roll the dice</div></div>
-      <div class="btns">
-        <button class="act blue" id="roll"><span class="ico">🎲</span> Roll the dice</button>
-        <button class="act red" id="surr"><span class="ico">🏳</span> Surrender</button>
-        <button class="act slate" id="skip"><span class="ico">⟳</span> End turn</button>
-      </div>
+  <footer id="dock">
+    <div id="chips"></div>
+    <div id="dicebox">
+      <button id="dice" aria-label="Tap the dice to roll">
+        <div class="scene"><div class="cube" id="cube"></div></div>
+      </button>
+      <div id="hint">Tap the dice</div>
     </div>
-  </aside>
-
-  <footer id="kingdoms"></footer>
+    <div id="acts">
+      <button class="act blue" id="dip"><span class="ico">🤝</span><span>Diplomacy</span></button>
+      <button class="act slate" id="skip"><span class="ico">⏭</span><span>End turn</span></button>
+    </div>
+  </footer>
 </div>
 
 <div id="menu" class="overlay">
-  <div class="card">
+  <div class="card menu">
     <div class="crown">♛</div>
     <h1>Ludo Realms</h1>
     <p class="sub">Siege &amp; Vassalage</p>
-    <p class="lbl">Kingdoms</p>
-    <div class="seg" id="np"><button data-v="2">2</button><button data-v="3">3</button><button data-v="4" class="on">4</button></div>
-    <button class="act gold big" id="start">Start the siege</button>
-    <button class="act slate" id="howto">How to play</button>
-    <p class="fine">Pass &amp; play on one device · drag to turn the board · pinch or scroll to zoom</p>
+    <div id="mpages">
+      <section data-p="home">
+        <button class="mode" data-go="friends"><b>🌐 Play with friends</b><small>Create or join a room · online</small></button>
+        <button class="mode" data-go="bot"><b>🤖 Play vs computer</b><small>Take on 1–3 AI kingdoms</small></button>
+        <button class="mode" data-go="pass"><b>👥 Pass &amp; play</b><small>One device, take turns</small></button>
+        <button class="act slate" id="howto">How to play</button>
+      </section>
+      <section data-p="bot" hidden>
+        <p class="lbl">Opponents</p>
+        <div class="seg" id="botN"><button data-v="2">1</button><button data-v="3">2</button><button data-v="4" class="on">3</button></div>
+        <button class="act gold big" id="startBot">Start the siege</button>
+        <button class="act slate back" data-go="home">‹ Back</button>
+      </section>
+      <section data-p="pass" hidden>
+        <p class="lbl">Players</p>
+        <div class="seg" id="passN"><button data-v="2">2</button><button data-v="3">3</button><button data-v="4" class="on">4</button></div>
+        <label class="chk"><input type="checkbox" id="autoView" checked> Turn the board to each player</label>
+        <button class="act gold big" id="startPass">Start the siege</button>
+        <button class="act slate back" data-go="home">‹ Back</button>
+      </section>
+      <section data-p="friends" hidden>
+        <p class="lbl">Your name</p>
+        <input id="pname" maxlength="14" placeholder="Knight" autocomplete="nickname">
+        <p class="lbl">Create a room for</p>
+        <div class="seg" id="roomN"><button data-v="2">2</button><button data-v="3">3</button><button data-v="4" class="on">4</button></div>
+        <button class="act gold" id="mkRoom">Create room</button>
+        <p class="lbl">…or join with a code</p>
+        <div class="joinrow"><input id="rcode" maxlength="5" placeholder="ABCDE" autocapitalize="characters" autocomplete="off"><button class="act blue" id="joinRoom">Join</button></div>
+        <p class="fine" id="netNote"></p>
+        <button class="act slate back" data-go="home">‹ Back</button>
+      </section>
+    </div>
+    <p class="fine">Drag to turn the board · pinch or scroll to zoom</p>
   </div>
 </div>
 

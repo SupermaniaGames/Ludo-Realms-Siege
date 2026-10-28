@@ -1,6 +1,6 @@
 /* Software 3D renderer on a 2D canvas: real perspective projection, rotatable camera,
    lit & shaded 3D meshes, painter's-algorithm sorting, tweened animations, picking. */
-import { SZ, GATES, home, promoTiles, realmAt } from './engine.js';
+import { SZ, GATES, home, NAMES, promoTiles, realmAt, castleSquares } from './engine.js';
 import { tf, box, rgb } from './mesh.js';
 import { pieceMesh, havenMesh, wallMesh, pillarMesh, lintelMesh, hubMesh, castleParts, REALM_HEX } from './models.js';
 import { terrainFor, wood, CELL_PX } from './textures.js';
@@ -34,13 +34,13 @@ function texQuad(g, img, sx, sy, sw, sh, P) {
 export class Board3D {
   constructor(canvas, fx = {}) {
     this.cv = canvas; this.ctx = canvas.getContext('2d'); this.fx = fx;
-    this.panX = 0; this.panY = 0; this.yaw = 0; this.yawT = 0; this.elev = 1.0; this.elevT = 1.0; this.zoom = 1; this.zoomT = 1;
-    this.D = 48; this.k = 40; this.kT = 40; this.ox = 0; this.oy = 0;
+    this.panX = 0; this.panY = 0; this.yaw = 0; this.yawT = 0; this.elev = 1.08; this.elevT = 1.08; this.zoom = 1; this.zoomT = 1;
+    this.D = 60; this.k = 40; this.kT = 40; this.ox = 0; this.oy = 0;
     this.vp = new Map(); this.busy = new Set(); this.dying = new Set();
     this.tweens = []; this.effects = []; this.hl = {}; this.hits = []; this.g = null;
     this.mesh = new Map(); this.walls = new Map(); this.static = null; this.staticKey = '';
     this.woodTex = wood(); this.terr = [0, 1, 2, 3].map(terrainFor);
-    this.t0 = performance.now(); this.t = 0;
+    this.t0 = performance.now(); this.t = 0; this.burnt = new Set(); this.auto = false;
     this._buildScenery();
     this._bindInput();
     this.resize();
@@ -71,9 +71,9 @@ export class Board3D {
     }
     push(hubMesh(), 0, 0, 0, 'hub');
     this.castles = [0, 1, 2, 3].map(r => {
-      const h = home(r), [hx, hz] = wc(h.cx, h.cy), cx = hx - h.dx * 2.1, cz = hz - h.dy * 2.1;
-      for (const p of castleParts(r)) push(p.mesh, cx + p.x, p.y, cz + p.z, 'castle', { realm: r });
-      push(tf(pieceMesh('K', REALM_HEX[r]), { s: 1.45, y: 0.34 }), cx, 0.06, cz, 'king', { realm: r });
+      const K = 0.82, h = home(r), [hx, hz] = wc(h.cx, h.cy), cx = hx - h.dx * 1.95, cz = hz - h.dy * 1.95;
+      for (const p of castleParts(r)) push(tf(p.mesh, { s: K }), cx + p.x * K, p.y * K, cz + p.z * K, 'castle', { realm: r });
+      push(tf(pieceMesh('K', REALM_HEX[r]), { s: 1.45 * K, y: 0.34 * K }), cx, 0.06 * K, cz, 'king', { realm: r });
       return { cx, cz };
     });
   }
@@ -99,10 +99,10 @@ export class Board3D {
   _fit() {
     const sv = [this.k, this.ox, this.oy]; this.k = 1; this.ox = 0; this.oy = 0;
     let mnx = 1e9, mxx = -1e9, mny = 1e9, mxy = -1e9;
-    for (const [x, y, z] of [[-9.5, -0.4, -9.5], [9.5, -0.4, -9.5], [-9.5, -0.4, 9.5], [9.5, -0.4, 9.5], [-8, 2.7, -8], [8, 2.7, -8], [-8, 2.7, 8], [8, 2.7, 8]]) {
+    for (const [x, y, z] of [[-8.9, -0.4, -8.9], [8.9, -0.4, -8.9], [-8.9, -0.4, 8.9], [8.9, -0.4, 8.9], [-7.6, 2.5, -7.6], [7.6, 2.5, -7.6], [-7.6, 2.5, 7.6], [7.6, 2.5, 7.6]]) {
       const [sx, sy] = this.project(x, y, z); mnx = Math.min(mnx, sx); mxx = Math.max(mxx, sx); mny = Math.min(mny, sy); mxy = Math.max(mxy, sy);
     }
-    const W = this.W, H = this.H, pad = 0.97;
+    const W = this.W, H = this.H, pad = 0.985;
     const kT = Math.min(W * pad / (mxx - mnx), H * pad / (mxy - mny));
     this.kT = kT * this.zoom;
     this.k = sv[0]; this.ox = sv[1]; this.oy = sv[2];
@@ -115,10 +115,17 @@ export class Board3D {
     this.staticKey = ''; this._first = true;
   }
   rotate(dir) { this.yawT += dir * Math.PI / 2; }
-  resetView() { this.yawT = Math.round(this.yaw / (Math.PI * 2)) * Math.PI * 2; this.elevT = 1.0; this.zoomT = 1; this.panX = 0; this.panY = 0; }
+  resetView() { this.yawT = Math.round(this.yaw / (Math.PI * 2)) * Math.PI * 2; this.elevT = 1.08; this.zoomT = 1; this.panX = 0; this.panY = 0; }
+  /** turn the board so a realm's castle is at the bottom-left, nearest the player */
+  viewFor(realm) {
+    const base = [Math.PI / 2, Math.PI, 0, -Math.PI / 2][realm], k = Math.round((this.yawT - base) / (Math.PI * 2));
+    this.yawT = base + k * Math.PI * 2;
+  }
+  /** use another Game object without resetting animations (online play) */
+  attach(g) { this.g = g; }
 
   /* ------------ game state sync ------------ */
-  setGame(g) { this.g = g; this.vp.clear(); this.busy.clear(); this.dying.clear(); for (const w of this.walls.values()) { w.alive = true; w.fall = 0; } this.effects = []; this.staticKey = ''; this.sync(); }
+  setGame(g) { this.g = g; this.vp.clear(); this.busy.clear(); this.dying.clear(); for (const w of this.walls.values()) { w.alive = true; w.fall = 0; } this.effects = []; this.burnt = new Set(); this.staticKey = ''; this.sync(); }
   sync() {
     const g = this.g; if (!g) return;
     const seen = new Set();
@@ -168,6 +175,9 @@ export class Board3D {
         const v = this.vp.get(e.id); this.dying.add(e.id); this.busy.add(e.id);
         this.fx.bomb && this.fx.bomb(e); if (v) { this.burst(v.x, 0.4, v.z, 'boom'); await this.tween(0.4, t => { v.a = 1 - t; v.s = 1 + t * 0.3; v.y = t * 0.6; }); }
         this.vp.delete(e.id); this.dying.delete(e.id); this.busy.delete(e.id);
+      } else if (e.t === 'bombCastle') {
+        const c = this.castles[e.realm]; this.fx.bomb && this.fx.bomb(e); this.burst(c.cx, 1, c.cz, 'boom'); this.burst(c.cx + 0.6, 0.6, c.cz - 0.4, 'boom');
+        this.burnt.add(e.realm); this.staticKey = ''; await this.tween(0.8, () => { });
       } else if (e.t === 'surrender') {
         this.fx.fall && this.fx.fall(e); const c = this.castles[e.target]; this.burst(c.cx, 1.2, c.cz, 'sparkle'); await this.tween(0.4, () => { });
       }
@@ -208,14 +218,16 @@ export class Board3D {
   }
   _gpoly(g, pts, y = 0.02) { g.beginPath(); pts.forEach(([x, z], i) => { const q = this.project(x, y, z); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); g.closePath(); }
   _cell(g, cx, cy, inset = 0, y = 0.02) { const [x, z] = wc(cx, cy), h = 0.5 - inset; this._gpoly(g, [[x - h, z - h], [x + h, z - h], [x + h, z + h], [x - h, z + h]], y); }
-  _wallHull(w) {
+  _wallHull(w, pad = 0) {
     const hz = w.key[0] === 'h', hx = hz ? 0.5 : 0.1, hzz = hz ? 0.1 : 0.5, pts = [];
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) for (const y of [0, 0.6]) pts.push(this.project(w.x + sx * hx, y, w.z + sz * hzz));
     pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), lo = [], up = [];
     for (const p of pts) { while (lo.length > 1 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
     for (const p of pts.slice().reverse()) { while (up.length > 1 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
-    return lo.slice(0, -1).concat(up.slice(0, -1));
+    const hull = lo.slice(0, -1).concat(up.slice(0, -1));
+    if (pad) { const cx = hull.reduce((a, p) => a + p[0], 0) / hull.length, cy = hull.reduce((a, p) => a + p[1], 0) / hull.length; return hull.map(p => { const dx = p[0] - cx, dy = p[1] - cy, l = Math.hypot(dx, dy) || 1; return [p[0] + dx / l * pad, p[1] + dy / l * pad]; }); }
+    return hull;
   }
 
   /* ------------ static layer (table, base, tiles, decals, frame, labels) ------------ */
@@ -227,14 +239,14 @@ export class Board3D {
     this.static.width = this.cv.width; this.static.height = this.cv.height;
     const g = this.static.getContext('2d'); g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     // base slab
-    this._drawMesh(g, box(19.0, 0.5, 19.0, [58, 38, 22], { gloss: 0.2 }), 0, -0.9, 0);
-    const T = 9.5, N = 6, st = (2 * T) / N;
+    this._drawMesh(g, box(17.8, 0.5, 17.8, [58, 38, 22], { gloss: 0.2 }), 0, -0.9, 0);
+    const T = 8.9, N = 6, st = (2 * T) / N;
     for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
       const x0 = -T + i * st, z0 = -T + j * st, P = [[x0, z0], [x0 + st, z0], [x0 + st, z0 + st], [x0, z0 + st]].map(([x, z]) => this.project(x, -0.4, z));
       texQuad(g, this.woodTex, (i * 512 / N) | 0, (j * 512 / N) | 0, (512 / N) | 0, (512 / N) | 0, P);
     }
     // gold inlay line around the slab
-    g.strokeStyle = 'rgba(232,184,64,.75)'; g.lineWidth = 2; this._gpoly(g, [[-9.2, -9.2], [9.2, -9.2], [9.2, 9.2], [-9.2, 9.2]], -0.39); g.stroke();
+    g.strokeStyle = 'rgba(232,184,64,.75)'; g.lineWidth = 2; this._gpoly(g, [[-8.6, -8.6], [8.6, -8.6], [8.6, 8.6], [-8.6, 8.6]], -0.39); g.stroke();
     // realm blocks + tiles
     this._drawMesh(g, box(12, 0.4, 12, [52, 40, 32], { gloss: 0.1 }), 0, -0.4, 0);
     for (let r = 0; r < 4; r++) {
@@ -263,10 +275,11 @@ export class Board3D {
     const fr = [[0, -6.2, 12.8, 0.4], [0, 6.2, 12.8, 0.4], [-6.2, 0, 0.4, 12.8], [6.2, 0, 0.4, 12.8]]
       .map(([x, z, w, d]) => ({ x, z, w, d, dep: this.project(x, 0, z)[2] })).sort((a, b) => b.dep - a.dep);
     for (const f of fr) this._drawMesh(g, box(f.w, 0.16, f.d, [214, 164, 52], { gloss: 0.7 }), f.x, 0, f.z);
-    // coordinate labels
-    g.fillStyle = 'rgba(255,236,190,.9)'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `700 ${Math.max(9, Math.round(this.k / this.D * 0.5))}px Georgia,serif`;
-    'ABCDEFGHIJKL'.split('').forEach((l, i) => { for (const z of [-6.75, 6.75]) { const q = this.project(i - 5.5, 0, z); g.fillText(l, q[0], q[1]); } });
-    for (let i = 0; i < 12; i++) for (const x of [-6.75, 6.75]) { const q = this.project(x, 0, i - 5.5); g.fillText(String(i + 1), q[0], q[1]); }
+    // coordinate labels on little plates
+    const fs = Math.max(10, Math.round(this.k / this.D * 0.62)); g.font = `700 ${fs}px Georgia,serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    const plate = (txt, wx, wz) => { const q = this.project(wx, 0, wz), w = fs * (txt.length > 1 ? 1.5 : 1.15), h = fs * 1.05; g.fillStyle = 'rgba(28,16,6,.72)'; g.strokeStyle = 'rgba(233,191,90,.55)'; g.lineWidth = 1; g.beginPath(); g.roundRect(q[0] - w / 2, q[1] - h / 2, w, h, 4); g.fill(); g.stroke(); g.fillStyle = '#ffe9b0'; g.fillText(txt, q[0], q[1] + 0.5); };
+    'ABCDEFGHIJKL'.split('').forEach((l, i) => { for (const z of [-6.75, 6.75]) plate(l, i - 5.5, z); });
+    for (let i = 0; i < 12; i++) for (const x of [-6.75, 6.75]) plate(String(i + 1), x, i - 5.5);
   }
 
   /* ------------ frame ------------ */
@@ -274,6 +287,7 @@ export class Board3D {
     const dt = 1 / 60, lerp = (a, b, f) => a + (b - a) * f;
     // tweens
     for (let i = this.tweens.length - 1; i >= 0; i--) { const w = this.tweens[i], t = Math.min(1, (this.t - w.t0) / w.dur); w.fn(t); if (t >= 1) { this.tweens.splice(i, 1); w.res(); } }
+    if (this.auto) { this.yawT += 0.0035; this.yaw = this.yawT; }
     this.yaw = lerp(this.yaw, this.yawT, 0.14); if (Math.abs(this.yaw - this.yawT) < 1e-4) this.yaw = this.yawT;
     this.elev = lerp(this.elev, this.elevT, 0.2); this.zoom = lerp(this.zoom, this.zoomT, 0.2);
     this._sync_cam(); this._fit();
@@ -289,16 +303,26 @@ export class Board3D {
 
     // ground highlights
     if (G.last) { g.fillStyle = 'rgba(255,225,90,.38)'; for (const [x, y] of G.last) { this._cell(g, x, y, 0.02); g.fill(); } }
-    for (const c of hl.movable || []) { g.strokeStyle = `rgba(80,255,130,${0.55 + 0.45 * pulse})`; g.lineWidth = 3; g.fillStyle = 'rgba(70,255,120,.16)'; this._cell(g, c.x, c.y, 0.04); g.fill(); g.stroke(); }
-    if (hl.sel) { g.fillStyle = 'rgba(80,255,130,.38)'; g.strokeStyle = '#27d55e'; g.lineWidth = 3.5; this._cell(g, hl.sel.x, hl.sel.y, 0.02); g.fill(); g.stroke(); }
+    const ring = (cx, cy, r, stroke, w, fill) => { const [x, z] = wc(cx, cy); this._gpoly(g, Array.from({ length: 28 }, (_, i) => [x + Math.cos(i * 0.2244) * r, z + Math.sin(i * 0.2244) * r]), 0.03); if (fill) { g.fillStyle = fill; g.fill(); } g.strokeStyle = stroke; g.lineWidth = w; g.stroke(); };
+    g.save(); g.shadowColor = 'rgba(80,255,140,.9)'; g.shadowBlur = 10;
+    for (const c of hl.movable || []) ring(c.x, c.y, 0.44 + 0.03 * pulse, `rgba(110,255,160,${0.5 + 0.5 * pulse})`, 2.5, 'rgba(70,255,120,.14)');
+    g.restore();
+    if (hl.paths && hl.paths.length) this._drawPaths(g, hl.paths, pulse);
     for (const c of hl.dots || []) {
-      const [x, z] = wc(c.x, c.y);
-      if (c.cap) { g.fillStyle = `rgba(255,60,50,${0.22 + 0.2 * pulse})`; g.strokeStyle = '#ff3b30'; g.lineWidth = 3.5; this._cell(g, c.x, c.y, 0.04); g.fill(); g.stroke(); }
-      else { this._gpoly(g, Array.from({ length: 20 }, (_, i) => [x + Math.cos(i * 0.314) * (0.17 + 0.03 * pulse), z + Math.sin(i * 0.314) * (0.17 + 0.03 * pulse)])); g.fillStyle = 'rgba(40,220,90,.92)'; g.fill(); g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 1.5; g.stroke(); }
+      if (c.cap) { g.save(); g.shadowColor = '#ff3b30'; g.shadowBlur = 14; ring(c.x, c.y, 0.45, '#ff4a3d', 3.5, `rgba(255,60,50,${0.2 + 0.2 * pulse})`); g.restore(); }
+    }
+    if (hl.sel) {
+      g.save(); g.shadowColor = '#3dff86'; g.shadowBlur = 18;
+      ring(hl.sel.x, hl.sel.y, 0.5 + 0.03 * pulse, '#4dff8c', 5, 'rgba(70,255,130,.28)'); ring(hl.sel.x, hl.sel.y, 0.36, 'rgba(255,255,255,.9)', 2, null);
+      g.restore();
     }
     for (const c of hl.haven || []) { g.strokeStyle = `rgba(90,220,255,${0.5 + 0.5 * pulse})`; g.lineWidth = 3; g.fillStyle = 'rgba(90,220,255,.22)'; this._cell(g, c.x, c.y, 0.04); g.fill(); g.stroke(); }
     for (const c of hl.bombs || []) { g.strokeStyle = `rgba(255,70,50,${0.5 + 0.5 * pulse})`; g.lineWidth = 3.5; g.fillStyle = 'rgba(255,60,40,.28)'; this._cell(g, c.x, c.y, 0.04); g.fill(); g.stroke(); }
 
+    for (const r of hl.castles || []) {
+      const c = this.castles[r]; g.save(); g.shadowColor = '#ff3b30'; g.shadowBlur = 20; g.strokeStyle = `rgba(255,80,60,${0.6 + 0.4 * pulse})`; g.lineWidth = 4; g.fillStyle = `rgba(255,60,40,${0.14 + 0.16 * pulse})`;
+      this._gpoly(g, [[c.cx - 1.3, c.cz - 1.3], [c.cx + 1.3, c.cz - 1.3], [c.cx + 1.3, c.cz + 1.3], [c.cx - 1.3, c.cz + 1.3]], 0.03); g.fill(); g.stroke(); g.restore();
+    }
     // contact shadows
     g.fillStyle = 'rgba(0,0,0,.30)';
     for (const [id, v] of this.vp) { if (v.a < 0.3) continue; this._gpoly(g, Array.from({ length: 14 }, (_, i) => [v.x + 0.07 + Math.cos(i * 0.4488) * 0.4 * v.s, v.z + 0.09 + Math.sin(i * 0.4488) * 0.4 * v.s]), 0.01); g.fill(); }
@@ -315,7 +339,7 @@ export class Board3D {
     for (const [id, v] of this.vp) items.push({ w: this.project(v.x, v.y + 0.3, v.z)[2], id, v });
     items.sort((a, b) => b.w - a.w);
     this.hits = [];
-    const bombW = hl.walls;
+    const bombW = hl.walls, movSet = new Set((hl.movable || []).map(c => c.x + ',' + c.y));
     for (const it of items) {
       if (it.s) {
         const s = it.s;
@@ -332,14 +356,67 @@ export class Board3D {
       } else {
         const v = it.v, bb = [1e9, 1e9, -1e9, -1e9], sel = hl.sel && this.g.at(hl.sel.x, hl.sel.y) && this.g.at(hl.sel.x, hl.sel.y).id === it.id;
         const ry = v.k === 'N' ? Math.atan2(-v.dy, v.dx) : 0;
-        this._drawMesh(g, this._mesh(v.k, v.o), v.x, v.y, v.z, ry, v.s, v.a, bb, 1, sel ? 0.12 + 0.05 * Math.sin(this.t * 6) : 0);
+        this._drawMesh(g, this._mesh(v.k, v.o), v.x, v.y, v.z, ry, v.s, v.a, bb, 1, sel ? 0.14 + 0.05 * Math.sin(this.t * 6) : (movSet.has(Math.round(v.x + 5.5) + ',' + Math.round(v.z + 5.5)) && !this.busy.has(it.id) ? 0.05 + 0.04 * Math.sin(this.t * 4 + v.x) : 0));
         if (v.haven) { const hv = Math.max(v.halo || 0, 0); this._drawMesh(g, havenMesh(), v.x, v.y, v.z, 0, 1 + 0.03 * Math.sin(this.t * 3), (v.a) * (0.9 + 0.1 * pulse)); }
         if (!this.dying.has(it.id)) this.hits.push({ id: it.id, bb, w: it.w });
       }
     }
     this._drawFx(g, G);
   }
+  /* movement overlay: glowing path lines, arrow heads and pips (solid = slide, dashed = knight leap) */
+  _drawPaths(g, paths, pulse) {
+    const u = this.k / this.D, seen = new Set(), P = (cx, cy) => { const [x, z] = wc(cx, cy); return this.project(x, 0.03, z); };
+    g.save(); g.lineCap = 'round'; g.lineJoin = 'round';
+    for (const pass of [0, 1]) for (const p of paths) {
+      const col = p.cap ? '255,92,72' : p.knight ? '120,200,255' : '90,255,170';
+      for (let i = 0; i < p.pts.length - 1; i++) {
+        const a = p.pts[i], b = p.pts[i + 1], key = pass + p.knight + a + '>' + b; if (seen.has(key)) continue; seen.add(key);
+        const A = P(a[0], a[1]), B = P(b[0], b[1]);
+        g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]);
+        if (pass === 0) { g.strokeStyle = `rgba(${col},.16)`; g.lineWidth = u * 0.42; g.setLineDash([]); }
+        else { g.strokeStyle = `rgba(${col},.9)`; g.lineWidth = Math.max(2, u * 0.09); g.setLineDash(p.knight ? [u * 0.28, u * 0.2] : []); }
+        g.stroke();
+      }
+    }
+    g.setLineDash([]);
+    const pip = (cx, cy, r, col, core) => { const q = P(cx, cy), gr = g.createRadialGradient(q[0], q[1], 0, q[0], q[1], r * 2.4); gr.addColorStop(0, `rgba(${col},.95)`); gr.addColorStop(0.45, `rgba(${col},.45)`); gr.addColorStop(1, `rgba(${col},0)`); g.fillStyle = gr; g.beginPath(); g.arc(q[0], q[1], r * 2.4, 0, 7); g.fill(); g.fillStyle = core; g.beginPath(); g.arc(q[0], q[1], r * 0.55, 0, 7); g.fill(); };
+    const pipSeen = new Set();
+    for (const p of paths) {
+      const col = p.cap ? '255,92,72' : p.knight ? '120,200,255' : '90,255,170', n = p.pts.length;
+      for (let i = 1; i < n - 1; i++) { const c = p.pts[i], key = c + ''; if (p.knight && !p.land.includes(i)) continue; if (pipSeen.has(key)) continue; pipSeen.add(key); pip(c[0], c[1], u * 0.1, col, '#fff'); }
+    }
+    for (const p of paths) {                       // destination: arrow head + pulsing pip
+      const col = p.cap ? '255,92,72' : p.knight ? '120,200,255' : '90,255,170', n = p.pts.length, a = p.pts[n - 2], b = p.pts[n - 1];
+      const [ax, az] = wc(a[0], a[1]), [bx, bz] = wc(b[0], b[1]); let dx = bx - ax, dz = bz - az; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+      const nx = -dz, nz = dx, tip = [bx - dx * 0.2, bz - dz * 0.2], base = [bx - dx * 0.55, bz - dz * 0.55];
+      this._gpoly(g, [tip, [base[0] + nx * 0.2, base[1] + nz * 0.2], [base[0] - nx * 0.2, base[1] - nz * 0.2]], 0.035);
+      g.fillStyle = `rgba(${col},.92)`; g.fill(); g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 1.2; g.stroke();
+      pip(b[0], b[1], u * (p.cap ? 0.2 : 0.15 + 0.03 * pulse), col, '#fff');
+    }
+    g.restore();
+  }
+  _drawPlates(g, G) {
+    const u = this.k / this.D, fs = Math.max(10, u * 0.52), pos = [];
+    g.save(); g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `700 ${fs}px Georgia,serif`;
+    for (let r = 0; r < 4; r++) {
+      if (!G.players.includes(r)) continue; const c = this.castles[r], q = this.project(c.cx, 2.25, c.cz), dead = G.dead.has(r), f = G.fallen && G.fallen[r];
+      const name = NAMES[r] + (dead ? (f && f.how === 'surrender' ? ' 🏳' : ' 🔥') : G.alliesOf(r).length ? ' 🤝' : ''), w = g.measureText(name).width + fs * 1.1, h = fs * 1.55, cur = !dead && G.players[G.turn] === r && G.phase !== 'over';
+      pos[r] = q;
+      g.globalAlpha = dead ? 0.6 : 1; g.shadowColor = cur ? '#3dff86' : 'rgba(0,0,0,.5)'; g.shadowBlur = cur ? 16 : 6;
+      g.fillStyle = REALM_HEX[r]; g.strokeStyle = cur ? '#7dffb0' : '#f0cb6a'; g.lineWidth = 2; g.beginPath(); g.roundRect(q[0] - w / 2, q[1] - h / 2, w, h, h / 2); g.fill(); g.stroke(); g.shadowBlur = 0;
+      g.fillStyle = 'rgba(255,255,255,.22)'; g.beginPath(); g.roundRect(q[0] - w / 2 + 2, q[1] - h / 2 + 2, w - 4, h / 2 - 2, h / 4); g.fill();
+      g.fillStyle = '#fff'; g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = 3; g.fillText(name, q[0], q[1] + 1); g.shadowBlur = 0; g.globalAlpha = 1;
+      this.plates = this.plates || []; this.plates[r] = { x: q[0], y: q[1], w, h };
+    }
+    for (const key of G.allies) {                                  // golden bond between allied castles
+      const [a, b] = key.split('-').map(Number); if (!pos[a] || !pos[b]) continue;
+      g.strokeStyle = 'rgba(255,214,90,.85)'; g.lineWidth = 3; g.setLineDash([8, 6]); g.beginPath(); g.moveTo(pos[a][0], pos[a][1]); g.lineTo(pos[b][0], pos[b][1]); g.stroke(); g.setLineDash([]);
+      g.font = `${fs * 1.4}px serif`; g.fillText('🤝', (pos[a][0] + pos[b][0]) / 2, (pos[a][1] + pos[b][1]) / 2);
+    }
+    g.restore();
+  }
   _drawFx(g, G) {
+    this._drawPlates(g, G);
     // flames over fallen castles
     if (this.burnt) for (const r of this.burnt) {
       const c = this.castles[r];
@@ -370,7 +447,7 @@ export class Board3D {
     if (wantWalls) {
       let best = null;
       for (const w of this.walls.values()) {
-        if (!w.alive || w.fall) continue; const h = this._wallHull(w); let ins = false;
+        if (!w.alive || w.fall) continue; const h = this._wallHull(w, 12); let ins = false;
         for (let i = 0, j = h.length - 1; i < h.length; j = i++) { if (((h[i][1] > py) !== (h[j][1] > py)) && (px < (h[j][0] - h[i][0]) * (py - h[i][1]) / (h[j][1] - h[i][1]) + h[i][0])) ins = !ins; }
         if (ins) { const d = this.project(w.x, 0.3, w.z)[2]; if (!best || d < best.d) best = { d, key: w.key }; }
       }
@@ -379,6 +456,10 @@ export class Board3D {
     let hit = null;
     for (const h of this.hits) if (px >= h.bb[0] && px <= h.bb[2] && py >= h.bb[1] && py <= h.bb[3]) { if (!hit || h.w < hit.w) hit = h; }
     if (hit) { const p = this.g.pieces.find(q => q.id === hit.id); if (p) return { type: 'cell', x: p.x, y: p.y }; }
+    for (const hh of [1.2, 0]) {
+      const [cx, cz] = this.unproject(px, py, hh);
+      for (let r = 0; r < 4; r++) { const c = this.castles[r]; if (Math.abs(cx - c.cx) < 1.3 && Math.abs(cz - c.cz) < 1.3) return { type: 'castle', realm: r }; }
+    }
     const [wx, wz] = this.unproject(px, py, 0), x = Math.floor(wx + 6), y = Math.floor(wz + 6);
     if (x < 0 || y < 0 || x >= SZ || y >= SZ) return null;
     return { type: 'cell', x, y };
