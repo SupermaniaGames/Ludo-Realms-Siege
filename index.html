@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ludo Realms: Siege</title>
+<meta name="description" content="A 4-kingdom chess-style siege game with 3D pieces. Pass and play.">
+<meta name="theme-color" content="#2b1a0c">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div class="banner"><h1>Ludo Realms: Siege</h1></div>
+    <div id="ribbon"><span id="ribIcon"></span><b id="ribText"></b></div>
+  </header>
+
+  <aside id="left">
+    <section class="panel"><h2>Players</h2><ul id="plist"></ul></section>
+    <section class="panel"><h2>Piece Legend</h2><ul id="legend"></ul></section>
+  </aside>
+
+  <main id="stage">
+    <canvas id="cv" aria-label="Game board"></canvas>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <div id="viewbtns">
+      <button id="vl" title="Rotate left" aria-label="Rotate view left">⟲</button>
+      <button id="vh" title="Reset view" aria-label="Reset view">⌂</button>
+      <button id="vr" title="Rotate right" aria-label="Rotate view right">⟳</button>
+      <button id="snd" title="Sound" aria-label="Sound on or off">🔊</button>
+    </div>
+  </main>
+
+  <aside id="right">
+    <section class="panel faces"><h2>Custom D6 Dice</h2><div id="faces"></div></section>
+    <section class="panel effects"><h2>D6 Effects</h2>
+      <p><b>1–4 Move:</b> move one piece up to that many squares.</p>
+      <p><b>5 Breaker:</b> blast a wall open, or destroy a piece inside a Haven.</p>
+      <p><b>6 Haven:</b> shield one piece from normal attacks.</p>
+    </section>
+    <div class="dock">
+      <div id="result"><div id="die"></div><div id="hint">Roll the dice</div></div>
+      <div class="btns">
+        <button class="act blue" id="roll"><span class="ico">🎲</span> Roll the dice</button>
+        <button class="act red" id="surr"><span class="ico">🏳</span> Surrender</button>
+        <button class="act slate" id="skip"><span class="ico">⟳</span> End turn</button>
+      </div>
+    </div>
+  </aside>
+
+  <footer id="kingdoms"></footer>
+</div>
+
+<div id="menu" class="overlay">
+  <div class="card">
+    <div class="crown">♛</div>
+    <h1>Ludo Realms</h1>
+    <p class="sub">Siege &amp; Vassalage</p>
+    <p class="lbl">Kingdoms</p>
+    <div class="seg" id="np"><button data-v="2">2</button><button data-v="3">3</button><button data-v="4" class="on">4</button></div>
+    <button class="act gold big" id="start">Start the siege</button>
+    <button class="act slate" id="howto">How to play</button>
+    <p class="fine">Pass &amp; play on one device · drag to turn the board · pinch or scroll to zoom</p>
+  </div>
+</div>
+
+<div id="modal" class="overlay" hidden>
+  <div class="card">
+    <h2 id="mt"></h2>
+    <div id="mb"></div>
+    <div id="mbtn"></div>
+  </div>
+</div>
+
+<noscript><p style="color:#fff;padding:2rem">This game needs JavaScript.</p></noscript>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
