@@ -9,6 +9,9 @@ export const promoTiles = r => { const h = home(r); return [[h.cx + h.dx, h.cy],
 /** the 4 squares "next to the castle": the entrance square + the 3 crowned squares */
 export const castleSquares = r => { const h = home(r); return [[h.cx, h.cy], ...promoTiles(r)]; };
 
+export const COST = { train: 3, haven: 4, N: 5, B: 5, R: 7, Q: 12 };
+export const LOOT = { P: 1, N: 2, B: 2, R: 3, Q: 5, K: 0 };
+const TRAIN_ORDER = [[0, 0], [1, 0], [0, 1], [1, 1], [2, 0], [0, 2], [2, 1], [1, 2], [2, 2]];
 const ORTH = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const DIAG = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
 const KJ = [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]];
@@ -20,7 +23,7 @@ export class Game {
     this.players = np === 2 ? [0, 3] : np === 3 ? [0, 1, 3] : [0, 1, 2, 3];
     this.uid = 1;
     this.walls = new Set();
-    for (let i = 0; i < SZ; i++) if (!GATES.includes(i)) { this.walls.add('v,' + i); this.walls.add('h,' + i); }
+    for (let i = 0; i < SZ; i++) { this.walls.add('v,' + i); this.walls.add('h,' + i); }   // gate rows hold barred DOORS (2 tiles wide)
     this.pieces = [];
     // Queen on the corner, Rook below, Bishop beside, Knight at C1, Pawns at C2, C3, A3, B3
     const set = [['Q', 0, 0], ['R', 0, 1], ['B', 1, 0], ['N', 2, 0], ['P', 2, 1], ['P', 2, 2], ['P', 0, 2], ['P', 1, 2]];
@@ -28,6 +31,46 @@ export class Game {
     this.turn = 0; this.phase = 'roll'; this.roll = null; this.msg = ''; this.last = null;
     this.dead = new Set(); this.fallen = {}; this.allies = new Set(); this.diploUsed = false;
     this.promoId = null; this.winner = null; this.winners = []; this.moveNo = 0; this.rollSeq = 0;
+    // economy: gold, mines (2 per kingdom + 4 contested vaults in the centre), one barracks action per turn
+    this.gold = {}; this.players.forEach(r => { this.gold[r] = 3; }); this.shopUsed = false; this.income = null;
+    this.mines = [];
+    this.players.forEach(r => { const h = home(r); [[4, 1], [1, 4]].forEach(([a, b]) => this.mines.push({ x: h.cx + h.dx * a, y: h.cy + h.dy * b, realm: r })); });
+    [[5, 5], [6, 5], [5, 6], [6, 6]].forEach(([x, y]) => this.mines.push({ x, y, realm: -1 }));
+  }
+  /** gold a kingdom earns at the start of its turn: 2 base + its mines (not while an enemy stands on them) + enemy mines / vaults it occupies */
+  incomeFor(r) {
+    let g = 2;
+    for (const m of this.mines) {
+      const occ = this.at(m.x, m.y);
+      if (m.realm === r) { if (!occ || occ.o === r || this.allied(occ.o, r)) g += 1; }
+      else if (occ && occ.o === r) g += m.realm === -1 ? 2 : 1;
+    }
+    return g;
+  }
+  canShop() { return this.phase === 'roll' && !this.shopUsed; }
+  trainCell() {
+    const r = this.cur, h = home(r);
+    for (const [a, b] of TRAIN_ORDER) { const x = h.cx + h.dx * a, y = h.cy + h.dy * b; if (!this.at(x, y)) return [x, y]; }
+    return null;
+  }
+  train() {
+    const r = this.cur, c = this.trainCell();
+    if (this.gold[r] < COST.train || !c || this.count(r) >= 16) return null;
+    const h = home(r), p = { id: this.uid++, k: 'P', o: r, x: c[0], y: c[1], dx: h.dx, dy: h.dy, haven: false };
+    this.pieces.push(p); this.gold[r] -= COST.train; this.shopUsed = true; this.msg = NAMES[r] + ' trained a Pawn';
+    return [{ t: 'train', id: p.id, x: p.x, y: p.y }];
+  }
+  upgrade(p, k) {
+    const r = this.cur;
+    if (p.o !== r || p.k !== 'P' || !COST[k] || this.gold[r] < COST[k]) return null;
+    this.gold[r] -= COST[k]; p.k = k; this.shopUsed = true; this.msg = NAMES[r] + ' upgraded a Pawn to ' + KN[k];
+    return [{ t: 'promote', id: p.id, k }];
+  }
+  buyHaven(p) {
+    const r = this.cur;
+    if (p.o !== r || p.haven || this.gold[r] < COST.haven) return null;
+    this.gold[r] -= COST.haven; p.haven = true; this.shopUsed = true; this.msg = NAMES[r] + ' bought a Haven';
+    return [{ t: 'haven', id: p.id }];
   }
   _mk(r, k, lx, ly) {
     const h = home(r);
@@ -141,7 +184,8 @@ export class Game {
     if (o) {
       this.pieces.splice(this.pieces.indexOf(o), 1);
       ev.push({ t: 'capture', id: o.id, x, y });
-      this.msg = NAMES[p.o] + ' captured a ' + KN[o.k];
+      this.gold[p.o] = (this.gold[p.o] || 0) + LOOT[o.k];
+      this.msg = NAMES[p.o] + ' captured a ' + KN[o.k] + ' (+' + LOOT[o.k] + ' gold)';
     }
     p.x = x; p.y = y; p.haven = false;
     if (o && this.alive(o.o) && !this.count(o.o)) ev.push(...this._fall(o.o, 'army destroyed'));
@@ -152,6 +196,7 @@ export class Game {
   }
   _fall(r, why) {
     const ids = this.pieces.filter(q => q.o === r).map(q => q.id);
+    this.mines.forEach(m => { if (m.realm === r) m.realm = -1; }); this.gold[r] = 0;
     this.dead.add(r); this.fallen[r] = { how: 'destroyed' }; this.pieces = this.pieces.filter(q => q.o !== r);
     this._dropAllies(r);
     this.msg = NAMES[r] + ' falls: ' + why + '!';
@@ -162,6 +207,7 @@ export class Game {
   _conquer(t, by, how) {
     const h = home(t);
     this.pieces.forEach(p => { if (p.o !== t) return; p.o = by; p.haven = false; if (p.k !== 'P') { p.k = 'P'; p.dx = h.dx; p.dy = h.dy; } });
+    this.gold[by] += this.gold[t] || 0; this.gold[t] = 0; this.mines.forEach(m => { if (m.realm === t) m.realm = by; });
     this.dead.add(t); this.fallen[t] = { how, by }; this._dropAllies(t);
   }
   promote(k) {
@@ -174,8 +220,10 @@ export class Game {
     return [{ t: 'haven', id: p.id }];
   }
   bombWall(key) {
-    this.walls.delete(key); this.msg = NAMES[this.cur] + ' blasted a wall open'; this.phase = 'resolved';
-    return [{ t: 'bombWall', key }];
+    const [t, i] = key.split(','), n = +i, door = GATES.includes(n), keys = door ? [key, t + ',' + (n ^ 1)] : [key];
+    keys.forEach(k => this.walls.delete(k));
+    this.msg = NAMES[this.cur] + (door ? ' smashed a gate door open!' : ' blasted a wall open'); this.phase = 'resolved';
+    return keys.map(k => ({ t: 'bombWall', key: k }));
   }
   bombPiece(p) {
     const ev = [{ t: 'bombPiece', id: p.id, x: p.x, y: p.y }], o = p.o;
@@ -205,7 +253,8 @@ export class Game {
     if (this._checkOver()) return;
     let i = this.turn;
     do { i = (i + 1) % this.players.length; } while (!this.alive(this.players[i]));
-    this.turn = i; this.phase = 'roll'; this.roll = null;
+    this.turn = i; this.phase = 'roll'; this.roll = null; this.shopUsed = false;
+    const inc = this.incomeFor(this.cur); this.gold[this.cur] += inc; this.income = { realm: this.cur, amt: inc };
   }
 
   /* ---- diplomacy: alliance & surrender (asked before you roll, once per turn) ---- */
@@ -223,7 +272,7 @@ export class Game {
 
   /* ---- (de)serialisation for online play ---- */
   toJSON() {
-    return { players: this.players, uid: this.uid, walls: [...this.walls], pieces: this.pieces, turn: this.turn, phase: this.phase, roll: this.roll, msg: this.msg, last: this.last, dead: [...this.dead], fallen: this.fallen, allies: [...this.allies], diploUsed: this.diploUsed, promoId: this.promoId, winner: this.winner, winners: this.winners, moveNo: this.moveNo, rollSeq: this.rollSeq };
+    return { players: this.players, uid: this.uid, walls: [...this.walls], pieces: this.pieces, turn: this.turn, phase: this.phase, roll: this.roll, msg: this.msg, last: this.last, dead: [...this.dead], fallen: this.fallen, allies: [...this.allies], diploUsed: this.diploUsed, promoId: this.promoId, winner: this.winner, winners: this.winners, moveNo: this.moveNo, rollSeq: this.rollSeq, gold: this.gold, mines: this.mines, shopUsed: this.shopUsed, income: this.income };
   }
   static from(o) {
     const g = Object.create(Game.prototype);

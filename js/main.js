@@ -1,5 +1,5 @@
 /* Ludo Realms: Siege — game controller / UI wiring */
-import { Game, NAMES, KN, home } from './engine.js';
+import { Game, NAMES, KN, home, COST } from './engine.js';
 import { Board3D } from './render.js';
 import { REALM_HEX } from './models.js';
 import { sfx, setMuted, isMuted } from './audio.js';
@@ -11,7 +11,7 @@ const $ = s => document.querySelector(s);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const LS = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { } } };
 
-let game = null, mode = 'pass', busy = false, sel = null, toastT = 0, human = 0, autoView = true, myRealm = -1, lobby = null, lastPropId = 0, seenSeq = 0, queue = Promise.resolve();
+let pend = null, game = null, mode = 'pass', busy = false, sel = null, toastT = 0, human = 0, autoView = true, myRealm = -1, lobby = null, lastPropId = 0, seenSeq = 0, queue = Promise.resolve();
 
 const board = new Board3D($('#cv'), { move: () => sfx.move(), capture: () => sfx.capture(), bomb: () => sfx.bomb(), haven: () => sfx.haven(), promote: () => sfx.promote(), fall: () => sfx.fall() });
 window.__board = board; window.__game = () => game;
@@ -23,9 +23,9 @@ const SHOW = { 1: [0, 0], 2: [0, -90], 3: [-90, 0], 4: [90, 0], 5: [0, 90], 6: [
 let cubeRot = [-18, 24];
 function setCube(v, spin) {
   const c = $('#cube'), [x, y] = SHOW[v];
-  c.style.transition = spin ? 'transform 1s cubic-bezier(.2,.7,.2,1)' : 'none';
-  c.style.transform = `rotateX(${x + (spin ? 720 : 0)}deg) rotateY(${y + (spin ? 1080 : 0)}deg)`;
-  if (spin) setTimeout(() => { c.style.transition = 'none'; c.style.transform = `rotateX(${x}deg) rotateY(${y}deg)`; }, 1040);
+  c.style.transition = spin ? 'transform .38s ease-out' : 'none';
+  c.style.transform = `rotateX(${x + (spin ? 360 : 0)}deg) rotateY(${y + (spin ? 360 : 0)}deg)`;
+  if (spin) setTimeout(() => { c.style.transition = 'none'; c.style.transform = `rotateX(${x}deg) rotateY(${y}deg)`; }, 420);
 }
 setCube(1, false);
 
@@ -58,7 +58,7 @@ const mine = () => mode === 'pass' || (mode === 'bot' && game.cur === human) || 
 const canAct = () => !!game && !busy && game.phase !== 'over' && mine();
 
 /* ---------- state → UI ---------- */
-const HINT = { roll: 'Tap the dice to roll', pick: 'Tap a glowing piece, then a spot', bomb: 'Breaker! Tap a glowing target', haven: 'Haven! Tap one of your pieces', wait: '', promo: 'Choose a promotion', over: 'Game over', resolved: '' };
+const HINT = { roll: 'Tap the dice to roll (or visit the Barracks)', pick: 'Tap a glowing piece, then a spot', bomb: 'Breaker! Tap a glowing target', haven: 'Haven! Tap one of your pieces', wait: '', promo: 'Choose a promotion', over: 'Game over', resolved: '' };
 function who(r) { return mode === 'online' && lobby ? ((lobby.seats[game.players.indexOf(r)] || {}).name || NAMES[r]) : mode === 'bot' && r !== human ? NAMES[r] + ' (AI)' : NAMES[r]; }
 function refresh() {
   if (!game) return;
@@ -69,20 +69,22 @@ function refresh() {
   $('#chips').innerHTML = [0, 1, 2, 3].map(r => {
     const on = g.players.includes(r), c = g.count(r), dead = g.dead.has(r), al = on && !dead && g.alliesOf(r).length;
     const f = g.fallen[r];
-    return `<div class="kc ${on ? '' : 'off'} ${r === me && !over && on && !dead ? 'cur' : ''} ${dead ? 'out' : ''}" style="--c:${REALM_HEX[r]}">${emblem(r, 28)}<div class="meta"><div class="nm">${on ? who(r) : NAMES[r]}${al ? ' 🤝' : ''}${r === myRealm && online() ? ' ★' : ''}</div><div class="cnt">${on ? (dead ? (f && f.how === 'surrender' ? 'surrendered' : f && f.how === 'conquered' ? 'conquered' : 'fallen') : c + ' pieces') : '—'}</div><div class="bar">${Array.from({ length: 8 }, (_, i) => `<i class="${on && !dead && i < Math.min(c, 8) ? 'on' : ''}"></i>`).join('')}</div></div></div>`;
+    return `<div class="kc ${on ? '' : 'off'} ${r === me && !over && on && !dead ? 'cur' : ''} ${dead ? 'out' : ''}" style="--c:${REALM_HEX[r]}">${emblem(r, 28)}<div class="meta"><div class="nm">${on ? who(r) : NAMES[r]}${al ? ' 🤝' : ''}${r === myRealm && online() ? ' ★' : ''}</div><div class="cnt">${on ? (dead ? (f && f.how === 'surrender' ? 'surrendered' : f && f.how === 'conquered' ? 'conquered' : 'fallen') : c + ' pieces · 🪙' + (g.gold[r] || 0)) : '—'}</div><div class="bar">${Array.from({ length: 8 }, (_, i) => `<i class="${on && !dead && i < Math.min(c, 8) ? 'on' : ''}"></i>`).join('')}</div></div></div>`;
   }).join('');
   const can = canAct() && g.phase === 'roll';
   $('#dice').disabled = !can; $('#dice').classList.toggle('glow', can);
   $('#dip').disabled = !(canAct() && g.canDiplomacy());
+  $('#shop').disabled = !(canAct() && g.canShop());
   $('#skip').disabled = !(canAct() && ['pick', 'bomb', 'haven'].includes(g.phase));
-  $('#hint').textContent = busy && g.phase === 'roll' ? '' : (!mine() && !over && g.phase === 'roll' ? '' : HINT[g.phase] || '');
+  $('#hint').textContent = pend && !busy ? (pend.kind === 'upgrade' ? 'Tap a Pawn to upgrade it' : 'Tap a piece to shield it') : busy && g.phase === 'roll' ? '' : (!mine() && !over && g.phase === 'roll' ? '' : HINT[g.phase] || '');
   if (g.roll != null && !diceSpinning) setCube(g.roll, false);
   highlights();
 }
 let diceSpinning = false;
 function highlights() {
   const g = game, h = {};
-  if (canAct()) {
+  if (canAct() && pend && g.phase === 'roll') h.haven = g.pieces.filter(p => p.o === g.cur && (pend.kind === 'upgrade' ? p.k === 'P' : !p.haven && p.k !== 'K')).map(p => ({ x: p.x, y: p.y }));
+  else if (canAct()) {
     if (g.phase === 'pick') {
       const sp = sel && g.pieces.find(p => p.id === sel);
       h.movable = g.movable().filter(p => !sp || p.id !== sp.id).map(p => ({ x: p.x, y: p.y }));
@@ -119,11 +121,11 @@ async function finish() {
 }
 function nextTurn() {
   if (!game || game.phase !== 'roll') return;
-  if (mode === 'pass' && autoView) board.viewFor(game.cur);
+  if (game.income && game.phase === 'roll' && game.moveNo > 0 || (game.income && game.turn > 0)) toast('🪙 ' + who(game.income.realm) + ' collects ' + game.income.amt + ' gold');
   if (mode === 'bot' && game.cur !== human) botTurn();
 }
 async function spin(v) {
-  diceSpinning = true; sfx.dice(); setCube(v, true); await sleep(1050); diceSpinning = false;
+  diceSpinning = true; sfx.dice(); setCube(v, true); await sleep(430); diceSpinning = false;
 }
 async function roll() {
   if (!canAct() || game.phase !== 'roll') return;
@@ -137,8 +139,18 @@ async function roll() {
 }
 
 /* ---------- computer turn ---------- */
+async function botShop() {
+  const g = game, r = g.cur; let ev = null;
+  const pawn = g.pieces.filter(p => p.o === r && p.k === 'P').sort((a, b) => Math.abs(b.x - b.dx * 0) - 0)[0];
+  if (pawn && g.gold[r] >= 12) ev = g.upgrade(pawn, 'Q');
+  else if (pawn && g.gold[r] >= 7) ev = g.upgrade(pawn, 'R');
+  else if (g.gold[r] >= 3 && g.count(r) < 14 && g.trainCell()) ev = g.train();
+  if (ev) { busy = true; await board.play(ev); }
+}
 async function botTurn() {
   busy = true; refresh(); await sleep(700);
+  if (!game || mode !== 'bot') return;
+  await botShop(); refresh();
   if (!game || mode !== 'bot') return;
   const r = 1 + (Math.random() * 6 | 0); await spin(r);
   const ph = game.rollDice(r);
@@ -165,6 +177,7 @@ function onTap(px, py) {
   if (!hit) { if (sel) { sel = null; refresh(); } return; }
   if (hit.type === 'castle') return castleTap(hit.realm);
   if (!canAct()) return;
+  if (pend && g.phase === 'roll') return shopTap(hit);
   if (g.phase === 'pick' && hit.type === 'cell') {
     const p = g.at(hit.x, hit.y), sp = sel && g.pieces.find(q => q.id === sel);
     if (sp && g.moves(sp, g.roll).some(([x, y]) => x === hit.x && y === hit.y)) return act(g.doMove(sp, hit.x, hit.y));
@@ -186,6 +199,28 @@ function onTap(px, py) {
 }
 board.onTap = onTap;
 
+function shopTap(hit) {
+  const g = game, p = hit.type === 'cell' && g.at(hit.x, hit.y), k = pend.kind;
+  if (!p) { pend = null; refresh(); return; }
+  const ev = k === 'upgrade' ? g.upgrade(p, pend.k) : g.buyHaven(p);
+  if (!ev) return toast(k === 'upgrade' ? 'Pick one of your Pawns' : 'Pick one of your pieces');
+  pend = null; shopDone(ev);
+}
+async function shopDone(ev) {
+  busy = true; board.setHighlights({}); refresh(); push(ev); await board.play(ev); busy = false; toast(game.msg); refresh();
+}
+function shopDialog() {
+  const g = game, gold = g.gold[g.cur], has = (n) => gold >= n, pawns = g.pieces.some(p => p.o === g.cur && p.k === 'P');
+  const it = (t, cost, ok, f, cls = 'blue') => ({ t: `${t} · 🪙${cost}`, cls: ok ? cls : 'slate', f: ok ? f : () => toast('Not enough gold, or nothing to use it on.') });
+  modal('🏰 Barracks — you have 🪙' + gold, `<p>One purchase per turn. Earn gold from <b>mines 🪙</b> (an enemy standing on yours steals it), the <b>centre vaults 💎</b> (+2 for whoever holds one) and by capturing pieces.</p>`, [
+    it('Train a Pawn', COST.train, has(COST.train) && !!g.trainCell() && g.count(g.cur) < 16, async () => { const ev = g.train(); shopDone(ev); }),
+    it('Pawn → Knight', COST.N, has(COST.N) && pawns, () => { pend = { kind: 'upgrade', k: 'N' }; refresh(); }),
+    it('Pawn → Bishop', COST.B, has(COST.B) && pawns, () => { pend = { kind: 'upgrade', k: 'B' }; refresh(); }),
+    it('Pawn → Rook', COST.R, has(COST.R) && pawns, () => { pend = { kind: 'upgrade', k: 'R' }; refresh(); }),
+    it('Pawn → Queen', COST.Q, has(COST.Q) && pawns, () => { pend = { kind: 'upgrade', k: 'Q' }; refresh(); }, 'gold'),
+    it('Buy a Haven', COST.haven, has(COST.haven), () => { pend = { kind: 'haven' }; refresh(); }),
+    { t: 'Close' }]);
+}
 function castleTap(r) {
   const g = game; if (!g.players.includes(r)) return;
   if (g.phase === 'bomb' && canAct()) {
@@ -264,17 +299,17 @@ const replay = () => { if (online()) return toMenu(); startLocal(mode, game.play
 
 /* ---------- start / menu ---------- */
 function begin(g, m, opts = {}) {
-  mode = m; game = g; sel = null; busy = false; diceSpinning = false; human = 0; autoView = !!opts.autoView; myRealm = opts.myRealm ?? -1;
+  mode = m; game = g; sel = null; pend = null; busy = false; diceSpinning = false; human = 0; autoView = !!opts.autoView; myRealm = opts.myRealm ?? -1;
   board.auto = false; board.setGame(g); board.resetView(); if (m === 'bot') board.viewFor(0); if (opts.myRealm != null) board.viewFor(opts.myRealm);
   $('#menu').hidden = true; setCube(1, false); sfx.promote();
   const tag = $('#modeTag'); tag.hidden = m !== 'online'; if (m === 'online') tag.textContent = 'Room ' + room.code;
   refresh(); nextTurn();
 }
-function startLocal(m, n) { begin(new Game(n), m, { autoView: m === 'pass' && $('#autoView').checked }); }
+function startLocal(m, n) { begin(new Game(n), m, { autoView: false }); }
 function toMenu() {
   if (online()) { room.leave(); lobby = null; }
   game = null; mode = 'pass'; busy = false; $('#modeTag').hidden = true; $('#chips').innerHTML = ''; $('#ribText').textContent = ''; $('#ribIcon').innerHTML = '';
-  showMenu(); board.setGame(new Game(4)); board.auto = true; board.setHighlights({}); $('#hint').textContent = '';
+  showMenu(); board.setGame(new Game(4)); board.auto = false; board.setHighlights({}); $('#hint').textContent = '';
   $('#dice').disabled = true; $('#dice').classList.remove('glow'); $('#dip').disabled = true; $('#skip').disabled = true;
 }
 function showMenu(p = 'home') { $('#menu').hidden = false; for (const s of document.querySelectorAll('#mpages section')) s.hidden = s.dataset.p !== p; }
@@ -290,9 +325,7 @@ $('#menuBtn').onclick = () => { if (!game) return; if (game.phase === 'over') re
 $('#dice').onclick = roll;
 $('#dip').onclick = diploMenu;
 $('#skip').onclick = () => { if (canAct() && ['pick', 'bomb', 'haven'].includes(game.phase)) act(game.skip()); };
-$('#vl').onclick = () => board.rotate(-1);
-$('#vr').onclick = () => board.rotate(1);
-$('#vh').onclick = () => { board.resetView(); if (game && myRealm >= 0) board.viewFor(myRealm); else if (game && mode === 'bot') board.viewFor(0); };
+$('#shop').onclick = shopDialog;
 const snd = () => { $('#snd').textContent = isMuted() ? '🔇' : '🔊'; };
 $('#snd').onclick = () => { setMuted(!isMuted()); snd(); sfx.click(); };
 snd();
@@ -366,9 +399,28 @@ toMenu(); if (qroom) showMenu('friends');
 
 /* ---------- service worker: always prefer the network ---------- */
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => {
+  navigator.serviceWorker.register('lrs-sw.js', { updateViaCache: 'none' }).then(r => {
     r.update(); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') r.update(); });
   }).catch(() => { });
   let had = !!navigator.serviceWorker.controller, reloaded = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !reloaded) { reloaded = true; location.reload(); } had = true; });
 }
+
+/* ---------- install button (always on the home page) ---------- */
+let deferred = null;
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+const syncInstall = () => { $('#install').hidden = !!standalone(); };
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; syncInstall(); });
+addEventListener('appinstalled', () => { deferred = null; syncInstall(); toast('Installed! Open it from your home screen.'); });
+$('#install').onclick = async () => {
+  if (deferred) { deferred.prompt(); await deferred.userChoice; deferred = null; return; }
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  modal('📲 Install Ludo Realms', ios
+    ? '<ul><li>Tap the <b>Share</b> button in Safari.</li><li>Choose <b>Add to Home Screen</b>.</li><li>Tap <b>Add</b>.</li></ul>'
+    : '<ul><li><b>Android / Chrome:</b> tap the ⋮ menu → <b>Install app</b> (or Add to Home screen).</li><li><b>Desktop Chrome / Edge:</b> click the install icon in the address bar.</li><li>If it says "already installed", remove the old copy first, then reload.</li></ul>', [{ t: 'OK', cls: 'gold' }]);
+};
+syncInstall();
+/* credits */
+import('./credits.js').then(({ credits }) => {
+  $('#credits').innerHTML = credits.map(c => `<div class="cr"><small>${c.role}</small><img src="${c.logo}" alt="" onerror="this.onerror=null;this.src='assets/logo-placeholder.svg'"><b>${c.name}</b></div>`).join('');
+});

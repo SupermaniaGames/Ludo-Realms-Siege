@@ -2,7 +2,7 @@
    lit & shaded 3D meshes, painter's-algorithm sorting, tweened animations, picking. */
 import { SZ, GATES, home, NAMES, promoTiles, realmAt, castleSquares } from './engine.js';
 import { tf, box, rgb } from './mesh.js';
-import { pieceMesh, havenMesh, wallMesh, pillarMesh, lintelMesh, hubMesh, castleParts, REALM_HEX } from './models.js';
+import { doorMesh, pieceMesh, havenMesh, wallMesh, pillarMesh, lintelMesh, hubMesh, castleParts, REALM_HEX } from './models.js';
 import { terrainFor, wood, CELL_PX } from './textures.js';
 
 const L = (() => { const v = [-0.5, 0.82, 0.42], l = Math.hypot(...v); return v.map(a => a / l); })();
@@ -44,7 +44,7 @@ export class Board3D {
     this._buildScenery();
     this._bindInput();
     this.resize();
-    const loop = now => { this.t = (now - this.t0) / 1000; this._frame(); requestAnimationFrame(loop); };
+    let lastF = 0; const loop = now => { requestAnimationFrame(loop); if (now - lastF < 30) return; lastF = now; this.t = (now - this.t0) / 1000; this._frame(); };
     requestAnimationFrame(loop);
   }
 
@@ -57,8 +57,7 @@ export class Board3D {
       const z = i - 5.5;
       for (const hz of [false, true]) {
         const key = (hz ? 'h,' : 'v,') + i;
-        if (GATES.includes(i)) continue;
-        const it = { mesh: wallMesh(hz, i % 2), x: hz ? z : 0, y: 0, z: hz ? 0 : z, tag: 'wall', key, alive: true };
+        const it = { mesh: GATES.includes(i) ? doorMesh(hz) : wallMesh(hz, i % 2), x: hz ? z : 0, y: 0, z: hz ? 0 : z, tag: 'wall', key, alive: true };
         this.scenery.push(it); this.walls.set(key, it);
       }
     }
@@ -109,7 +108,7 @@ export class Board3D {
     this._ext = [mnx, mxx, mny, mxy];
   }
   resize() {
-    const r = this.cv.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const r = this.cv.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     this.W = Math.max(50, r.width); this.H = Math.max(50, r.height); this.dpr = dpr;
     this.cv.width = Math.round(this.W * dpr); this.cv.height = Math.round(this.H * dpr);
     this.staticKey = ''; this._first = true;
@@ -178,6 +177,8 @@ export class Board3D {
       } else if (e.t === 'bombCastle') {
         const c = this.castles[e.realm]; this.fx.bomb && this.fx.bomb(e); this.burst(c.cx, 1, c.cz, 'boom'); this.burst(c.cx + 0.6, 0.6, c.cz - 0.4, 'boom');
         this.burnt.add(e.realm); this.staticKey = ''; await this.tween(0.8, () => { });
+      } else if (e.t === 'train') {
+        const [x, z] = wc(e.x, e.y); this.fx.promote && this.fx.promote(e); this.burst(x, 0.5, z, 'sparkle'); await this.tween(0.35, () => { });
       } else if (e.t === 'surrender') {
         this.fx.fall && this.fx.fall(e); const c = this.castles[e.target]; this.burst(c.cx, 1.2, c.cz, 'sparkle'); await this.tween(0.4, () => { });
       }
@@ -323,6 +324,12 @@ export class Board3D {
       const c = this.castles[r]; g.save(); g.shadowColor = '#ff3b30'; g.shadowBlur = 20; g.strokeStyle = `rgba(255,80,60,${0.6 + 0.4 * pulse})`; g.lineWidth = 4; g.fillStyle = `rgba(255,60,40,${0.14 + 0.16 * pulse})`;
       this._gpoly(g, [[c.cx - 1.3, c.cz - 1.3], [c.cx + 1.3, c.cz - 1.3], [c.cx + 1.3, c.cz + 1.3], [c.cx - 1.3, c.cz + 1.3]], 0.03); g.fill(); g.stroke(); g.restore();
     }
+    for (const m of G.mines || []) {                                  // gold mines & vaults
+      const occ = G.at(m.x, m.y), col = m.realm < 0 ? '255,214,90' : (REALM_HEX[m.realm] ? '255,214,90' : '255,214,90');
+      this._cell(g, m.x, m.y, 0.12, 0.025); g.fillStyle = m.realm < 0 ? `rgba(255,200,50,${0.3 + 0.15 * pulse})` : 'rgba(255,200,50,.22)'; g.fill();
+      g.strokeStyle = m.realm < 0 ? '#ffe27a' : REALM_HEX[m.realm]; g.lineWidth = m.realm < 0 ? 2.5 : 3; g.stroke();
+      if (!occ) { const [x, z] = wc(m.x, m.y), q = this.project(x, 0.15, z), u = this.k / this.D; g.font = `${Math.max(12, u * 0.62)}px serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(m.realm < 0 ? '💎' : '🪙', q[0], q[1]); }
+    }
     // contact shadows
     g.fillStyle = 'rgba(0,0,0,.30)';
     for (const [id, v] of this.vp) { if (v.a < 0.3) continue; this._gpoly(g, Array.from({ length: 14 }, (_, i) => [v.x + 0.07 + Math.cos(i * 0.4488) * 0.4 * v.s, v.z + 0.09 + Math.sin(i * 0.4488) * 0.4 * v.s]), 0.01); g.fill(); }
@@ -400,7 +407,7 @@ export class Board3D {
     g.save(); g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `700 ${fs}px Georgia,serif`;
     for (let r = 0; r < 4; r++) {
       if (!G.players.includes(r)) continue; const c = this.castles[r], q = this.project(c.cx, 2.25, c.cz), dead = G.dead.has(r), f = G.fallen && G.fallen[r];
-      const name = NAMES[r] + (dead ? (f && f.how === 'surrender' ? ' 🏳' : ' 🔥') : G.alliesOf(r).length ? ' 🤝' : ''), w = g.measureText(name).width + fs * 1.1, h = fs * 1.55, cur = !dead && G.players[G.turn] === r && G.phase !== 'over';
+      const name = NAMES[r] + (dead ? '' : ' 🪙' + (G.gold ? G.gold[r] : 0)) + (dead ? (f && f.how === 'surrender' ? ' 🏳' : ' 🔥') : G.alliesOf(r).length ? ' 🤝' : ''), w = g.measureText(name).width + fs * 1.1, h = fs * 1.55, cur = !dead && G.players[G.turn] === r && G.phase !== 'over';
       pos[r] = q;
       g.globalAlpha = dead ? 0.6 : 1; g.shadowColor = cur ? '#3dff86' : 'rgba(0,0,0,.5)'; g.shadowBlur = cur ? 16 : 6;
       g.fillStyle = REALM_HEX[r]; g.strokeStyle = cur ? '#7dffb0' : '#f0cb6a'; g.lineWidth = 2; g.beginPath(); g.roundRect(q[0] - w / 2, q[1] - h / 2, w, h, h / 2); g.fill(); g.stroke(); g.shadowBlur = 0;
@@ -475,7 +482,7 @@ export class Board3D {
       if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; this.zoomT = Math.max(0.7, Math.min(2.6, startZ * Math.hypot(a[0] - b[0], a[1] - b[1]) / startD)); this.panX += dx / 2; this.panY += dy / 2; moved = 99; return; }
       if (e.shiftKey || e.buttons === 2) { this.panX += dx; this.panY += dy; moved += 20; return; }
       moved += Math.abs(dx) + Math.abs(dy);
-      if (moved > 8) { this.yawT -= dx * 0.008; this.yaw -= dx * 0.008; this.elevT = Math.max(0.5, Math.min(1.3, this.elevT + dy * 0.004)); this.elev = this.elevT; }
+      if (moved > 8) { this.panX += dx; this.panY += dy; }
     });
     const up = e => {
       if (!ptrs.has(e.pointerId)) return; const wasOne = ptrs.size === 1; ptrs.delete(e.pointerId);

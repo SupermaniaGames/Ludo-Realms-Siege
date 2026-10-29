@@ -1,5 +1,5 @@
 /* Computer opponent: greedy 1-ply search with a small danger check. */
-import { Game, KN, castleSquares, promoTiles } from './engine.js';
+import { Game, KN, castleSquares, promoTiles, GATES } from './engine.js';
 
 const VAL = { P: 1, N: 3, B: 3, R: 5, Q: 9, K: 0 };
 const rnd = a => a[Math.random() * a.length | 0];
@@ -47,7 +47,7 @@ export function chooseSpecial(g) {
     const t = g.bombTargets();
     if (t.castles.length) return { type: 'castle', realm: t.castles[0] };
     if (t.havens.length) return { type: 'piece', p: t.havens[0] };
-    if (t.walls.length && Math.random() < 0.55) return { type: 'wall', key: rnd(t.walls) };
+    if (t.walls.length) { const d = t.walls.filter(k => GATES.includes(+k.split(',')[1])); if (d.length) return { type: 'wall', key: rnd(d) }; if (Math.random() < 0.55) return { type: 'wall', key: rnd(t.walls) }; }
     return { type: 'skip' };
   }
   const mine = g.pieces.filter(p => p.o === g.cur && !p.haven && p.k !== 'K');
