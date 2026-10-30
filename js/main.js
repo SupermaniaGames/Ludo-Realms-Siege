@@ -17,17 +17,10 @@ const board = new Board3D($('#cv'), { move: () => sfx.move(), capture: () => sfx
 window.__board = board; window.__game = () => game;
 
 /* ---------- static UI ---------- */
-const FACE = { 1: 'front', 2: 'right', 3: 'top', 4: 'bottom', 5: 'left', 6: 'back' };
-$('#cube').innerHTML = [1, 2, 3, 4, 5, 6].map(v => `<div class="f ${FACE[v]}">${dieFace(v)}</div>`).join('');
-const SHOW = { 1: [0, 0], 2: [0, -90], 3: [-90, 0], 4: [90, 0], 5: [0, 90], 6: [0, 180] };
-let cubeRot = [-18, 24];
-function setCube(v, spin) {
-  const c = $('#cube'), [x, y] = SHOW[v];
-  c.style.transition = spin ? 'transform .38s ease-out' : 'none';
-  c.style.transform = `rotateX(${x + (spin ? 360 : 0)}deg) rotateY(${y + (spin ? 360 : 0)}deg)`;
-  if (spin) setTimeout(() => { c.style.transition = 'none'; c.style.transform = `rotateX(${x}deg) rotateY(${y}deg)`; }, 420);
-}
-setCube(1, false);
+$('#face').innerHTML = [1, 2, 3, 4, 5, 6].map(v => `<div class="fc" data-v="${v}">${dieFace(v)}</div>`).join('');
+const faces = [...document.querySelectorAll('#face .fc')];
+function setCube(v) { faces.forEach(f => f.classList.toggle('on', +f.dataset.v === v)); }
+setCube(1);
 
 const LEG = [['K', 'King', 'Waits in the palace and only watches'], ['Q', 'Queen', 'Slides any direction, up to the roll'], ['R', 'Rook', 'Slides straight, up to the roll'], ['B', 'Bishop', 'Slides diagonally, up to the roll'], ['N', 'Knight', 'Classic L-jump on any roll 1–4. Cannot jump walls'], ['P', 'Pawn', '1–2 forward, captures diagonally, promotes']];
 const RULES = `<div class="legend">${LEG.map(([k, n, d]) => `<div>${pieceIcon(k, '#6a4a1c', 24)}<span><b>${n}</b><small>${d}</small></span></div>`).join('')}</div><ul>
@@ -76,8 +69,7 @@ function refresh() {
   $('#dip').disabled = !(canAct() && g.canDiplomacy());
   $('#shop').disabled = !(canAct() && g.canShop());
   $('#skip').disabled = !(canAct() && ['pick', 'bomb', 'haven'].includes(g.phase));
-  $('#hint').textContent = pend && !busy ? (pend.kind === 'upgrade' ? 'Tap a Pawn to upgrade it' : 'Tap a piece to shield it') : busy && g.phase === 'roll' ? '' : (!mine() && !over && g.phase === 'roll' ? '' : HINT[g.phase] || '');
-  if (g.roll != null && !diceSpinning) setCube(g.roll, false);
+  if (g.roll != null && !diceSpinning) setCube(g.roll);
   highlights();
 }
 let diceSpinning = false;
@@ -125,17 +117,19 @@ function nextTurn() {
   if (mode === 'bot' && game.cur !== human) botTurn();
 }
 async function spin(v) {
-  diceSpinning = true; sfx.dice(); setCube(v, true); await sleep(430); diceSpinning = false;
+  diceSpinning = true; sfx.dice();
+  const d = $('#dice'); d.classList.remove('pop'); d.classList.add('rolling');
+  let last = 0; for (let i = 0; i < 5; i++) { let f; do { f = 1 + (Math.random() * 6 | 0); } while (f === last); last = f; setCube(f); await sleep(60); }
+  d.classList.remove('rolling'); setCube(v); void d.offsetWidth; d.classList.add('pop'); await sleep(120); diceSpinning = false;
 }
 async function roll() {
   if (!canAct() || game.phase !== 'roll') return;
-  busy = true; $('#dice').disabled = true; $('#hint').textContent = '';
+  busy = true; $('#dice').disabled = true; 
   const r = 1 + (Math.random() * 6 | 0);
   await spin(r);
   const ph = game.rollDice(r); push([]);
   if (ph === 'wait') { toast(game.msg); busy = true; refresh(); await sleep(1300); return finish(); }
   busy = false; refresh();
-  if (ph === 'bomb') toast('💣 Breaker — blast a glowing target next to your piece');
 }
 
 /* ---------- computer turn ---------- */
@@ -301,7 +295,7 @@ const replay = () => { if (online()) return toMenu(); startLocal(mode, game.play
 function begin(g, m, opts = {}) {
   mode = m; game = g; sel = null; pend = null; busy = false; diceSpinning = false; human = 0; autoView = !!opts.autoView; myRealm = opts.myRealm ?? -1;
   board.auto = false; board.setGame(g); board.resetView(); if (m === 'bot') board.viewFor(0); if (opts.myRealm != null) board.viewFor(opts.myRealm);
-  $('#menu').hidden = true; setCube(1, false); sfx.promote();
+  $('#menu').hidden = true; setCube(1); sfx.promote();
   const tag = $('#modeTag'); tag.hidden = m !== 'online'; if (m === 'online') tag.textContent = 'Room ' + room.code;
   refresh(); nextTurn();
 }
@@ -309,7 +303,7 @@ function startLocal(m, n) { begin(new Game(n), m, { autoView: false }); }
 function toMenu() {
   if (online()) { room.leave(); lobby = null; }
   game = null; mode = 'pass'; busy = false; $('#modeTag').hidden = true; $('#chips').innerHTML = ''; $('#ribText').textContent = ''; $('#ribIcon').innerHTML = '';
-  showMenu(); board.setGame(new Game(4)); board.auto = false; board.setHighlights({}); $('#hint').textContent = '';
+  showMenu(); board.setGame(new Game(4)); board.auto = false; board.setHighlights({}); 
   $('#dice').disabled = true; $('#dice').classList.remove('glow'); $('#dip').disabled = true; $('#skip').disabled = true;
 }
 function showMenu(p = 'home') { $('#menu').hidden = false; for (const s of document.querySelectorAll('#mpages section')) s.hidden = s.dataset.p !== p; }
